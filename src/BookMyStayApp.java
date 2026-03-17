@@ -55,6 +55,11 @@ class RoomInventory {
         inventory.put(type, current - 1);
     }
 
+    // ✅ NEW: RESTORE INVENTORY
+    void increaseAvailability(String type) {
+        inventory.put(type, inventory.get(type) + 1);
+    }
+
     boolean isValidRoomType(String type) {
         return inventory.containsKey(type);
     }
@@ -65,6 +70,7 @@ class Reservation {
     String guestName;
     String roomType;
     String roomId;
+    boolean isCancelled = false;
 
     Reservation(String guestName, String roomType) {
         this.guestName = guestName;
@@ -89,7 +95,7 @@ class BookingQueue {
     }
 }
 
-// BOOKING HISTORY
+// HISTORY
 class BookingHistory {
     private List<Reservation> history = new ArrayList<>();
 
@@ -102,7 +108,7 @@ class BookingHistory {
     }
 }
 
-// ✅ VALIDATOR CLASS
+// VALIDATOR
 class BookingValidator {
 
     static void validate(Reservation r, RoomInventory inventory)
@@ -146,45 +152,71 @@ class BookingService {
             Reservation r = queue.getNextRequest();
 
             try {
-                // ✅ VALIDATION
                 BookingValidator.validate(r, inventory);
 
                 String roomId = r.roomType + "-" + counter++;
 
-                if (!allocatedRooms.contains(roomId)) {
+                allocatedRooms.add(roomId);
+                inventory.reduceAvailability(r.roomType);
 
-                    allocatedRooms.add(roomId);
-                    inventory.reduceAvailability(r.roomType);
+                r.roomId = roomId;
+                confirmedBookings.put(roomId, r);
+                history.add(r);
 
-                    r.roomId = roomId;
-                    confirmedBookings.put(roomId, r);
-                    history.add(r);
-
-                    System.out.println("Confirmed: " + r.guestName + " -> " + roomId);
-                }
+                System.out.println("Confirmed: " + r.guestName + " -> " + roomId);
 
             } catch (InvalidBookingException e) {
-                // ✅ GRACEFUL ERROR
-                System.out.println("Booking Failed: " + e.getMessage());
+                System.out.println("Failed: " + e.getMessage());
             }
         }
     }
+
+    HashMap<String, Reservation> getConfirmedBookings() {
+        return confirmedBookings;
+    }
 }
 
-// REPORT SERVICE
-class BookingReportService {
+// ✅ NEW: CANCELLATION SERVICE
+class CancellationService {
 
-    void generateReport(List<Reservation> history) {
+    private RoomInventory inventory;
+    private HashMap<String, Reservation> bookings;
 
-        System.out.println("\n--- BOOKING REPORT ---");
+    // ✅ STACK for rollback
+    private Stack<String> rollbackStack = new Stack<>();
 
-        for (Reservation r : history) {
-            System.out.println("Guest: " + r.guestName +
-                    ", Room: " + r.roomType +
-                    ", ID: " + r.roomId);
+    CancellationService(RoomInventory inventory,
+                        HashMap<String, Reservation> bookings) {
+        this.inventory = inventory;
+        this.bookings = bookings;
+    }
+
+    void cancelBooking(String roomId) {
+
+        if (!bookings.containsKey(roomId)) {
+            System.out.println("Cancellation Failed: Booking not found");
+            return;
         }
 
-        System.out.println("Total Bookings: " + history.size());
+        Reservation r = bookings.get(roomId);
+
+        if (r.isCancelled) {
+            System.out.println("Cancellation Failed: Already cancelled");
+            return;
+        }
+
+        // ✅ LIFO tracking
+        rollbackStack.push(roomId);
+
+        // ✅ rollback steps
+        inventory.increaseAvailability(r.roomType);
+        r.isCancelled = true;
+
+        System.out.println("Cancelled: " + roomId);
+    }
+
+    void showRollbackStack() {
+        System.out.println("Rollback Stack: " + rollbackStack);
     }
 }
 
@@ -192,23 +224,34 @@ class BookingReportService {
 public class BookMyStayApp {
     public static void main(String[] args) {
 
-        System.out.println("Book My Stay App v9.0");
+        System.out.println("Book My Stay App v10.0");
 
         RoomInventory inventory = new RoomInventory();
         BookingQueue queue = new BookingQueue();
         BookingHistory history = new BookingHistory();
 
-        // ✅ TEST CASES (VALID + INVALID)
-        queue.addRequest(new Reservation("Ujjwal", "Single"));   // valid
-        queue.addRequest(new Reservation("", "Double"));         // invalid name
-        queue.addRequest(new Reservation("Rahul", "Luxury"));    // invalid type
-        queue.addRequest(new Reservation("Amit", "Suite"));      // valid
-        queue.addRequest(new Reservation("Ravi", "Suite"));      // no availability
+        // BOOKINGS
+        queue.addRequest(new Reservation("Ujjwal", "Single"));
+        queue.addRequest(new Reservation("Rahul", "Double"));
 
         BookingService service = new BookingService(inventory, history);
         service.processBookings(queue);
 
-        BookingReportService report = new BookingReportService();
-        report.generateReport(history.getAllBookings());
+        HashMap<String, Reservation> bookings = service.getConfirmedBookings();
+
+        // ✅ CANCELLATION
+        CancellationService cancelService =
+                new CancellationService(inventory, bookings);
+
+        // Cancel one booking
+        for (String roomId : bookings.keySet()) {
+            cancelService.cancelBooking(roomId);
+            break;
+        }
+
+        // Invalid cancellation
+        cancelService.cancelBooking("Invalid-101");
+
+        cancelService.showRollbackStack();
     }
 }
