@@ -1,4 +1,4 @@
-import java.util.HashMap;
+import java.util.*;
 
 // ROOM DOMAIN
 abstract class Room {
@@ -42,22 +42,15 @@ class RoomInventory {
         inventory = new HashMap<>();
         inventory.put("Single", 5);
         inventory.put("Double", 3);
-        inventory.put("Suite", 0); // set 0 to test filtering
+        inventory.put("Suite", 2);
     }
 
     int getAvailability(String type) {
         return inventory.getOrDefault(type, 0);
     }
-
-    void displayInventory() {
-        System.out.println("\nInventory:");
-        for (String key : inventory.keySet()) {
-            System.out.println(key + " → " + inventory.get(key));
-        }
-    }
 }
 
-// ✅ NEW: SEARCH SERVICE (READ-ONLY)
+// SEARCH (UC4 - READ ONLY)
 class RoomSearch {
 
     void searchAvailableRooms(RoomInventory inventory,
@@ -87,13 +80,53 @@ class RoomSearch {
     }
 }
 
+// ✅ NEW: RESERVATION (BOOKING REQUEST)
+class Reservation {
+    String guestName;
+    String roomType;
+
+    Reservation(String guestName, String roomType) {
+        this.guestName = guestName;
+        this.roomType = roomType;
+    }
+
+    void display() {
+        System.out.println(guestName + " requested " + roomType + " room");
+    }
+}
+
+// ✅ NEW: BOOKING QUEUE (FIFO)
+class BookingQueue {
+
+    Queue<Reservation> queue;
+
+    BookingQueue() {
+        queue = new LinkedList<>();
+    }
+
+    // Add request
+    void addRequest(Reservation r) {
+        queue.add(r);
+        System.out.println("Request added: ");
+        r.display();
+    }
+
+    // Display queue
+    void showQueue() {
+        System.out.println("\nBooking Requests in Queue (FIFO Order):");
+        for (Reservation r : queue) {
+            r.display();
+        }
+    }
+}
+
 // MAIN CLASS
 public class BookMyStayApp {
     public static void main(String[] args) {
 
-        System.out.println("Book My Stay App v4.0");
+        System.out.println("Book My Stay App v5.0");
 
-        // Room objects
+        // Rooms
         Room single = new SingleRoom();
         Room doub = new DoubleRoom();
         Room suite = new SuiteRoom();
@@ -101,11 +134,18 @@ public class BookMyStayApp {
         // Inventory
         RoomInventory inventory = new RoomInventory();
 
-        // Search (READ-ONLY)
+        // Search
         RoomSearch search = new RoomSearch();
         search.searchAvailableRooms(inventory, single, doub, suite);
 
-        // Show inventory again (unchanged)
-        inventory.displayInventory();
+        // ✅ Booking Requests (Queue)
+        BookingQueue bookingQueue = new BookingQueue();
+
+        bookingQueue.addRequest(new Reservation("Ujjwal", "Single"));
+        bookingQueue.addRequest(new Reservation("Rahul", "Double"));
+        bookingQueue.addRequest(new Reservation("Amit", "Suite"));
+
+        // Show queue (FIFO)
+        bookingQueue.showQueue();
     }
 }
