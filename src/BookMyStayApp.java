@@ -1,14 +1,15 @@
+import java.io.*;
 import java.util.*;
 
-// ✅ CUSTOM EXCEPTION
+// ================= EXCEPTION =================
 class InvalidBookingException extends Exception {
-    InvalidBookingException(String message) {
-        super(message);
+    InvalidBookingException(String msg) {
+        super(msg);
     }
 }
 
-// ROOM DOMAIN
-abstract class Room {
+// ================= ROOM =================
+abstract class Room implements Serializable {
     int beds;
     int price;
 
@@ -30,12 +31,11 @@ class SuiteRoom extends Room {
     SuiteRoom() { super(3, 5000); }
 }
 
-// ✅ THREAD-SAFE INVENTORY
-class RoomInventory {
-    private HashMap<String, Integer> inventory;
+// ================= INVENTORY =================
+class RoomInventory implements Serializable {
+    HashMap<String, Integer> inventory = new HashMap<>();
 
     RoomInventory() {
-        inventory = new HashMap<>();
         inventory.put("Single", 2);
         inventory.put("Double", 1);
         inventory.put("Suite", 1);
@@ -45,47 +45,43 @@ class RoomInventory {
         return inventory.getOrDefault(type, -1);
     }
 
-    synchronized void reduceAvailability(String type) throws InvalidBookingException {
-        int current = inventory.get(type);
-
-        if (current <= 0) {
-            throw new InvalidBookingException("No rooms available for " + type);
-        }
-
-        inventory.put(type, current - 1);
+    synchronized void reduce(String type) throws InvalidBookingException {
+        int val = inventory.get(type);
+        if (val <= 0) throw new InvalidBookingException("No rooms available for " + type);
+        inventory.put(type, val - 1);
     }
 
-    synchronized void increaseAvailability(String type) {
+    synchronized void increase(String type) {
         inventory.put(type, inventory.get(type) + 1);
     }
 
-    boolean isValidRoomType(String type) {
+    boolean isValid(String type) {
         return inventory.containsKey(type);
     }
 }
 
-// RESERVATION
-class Reservation {
+// ================= RESERVATION =================
+class Reservation implements Serializable {
     String guestName;
     String roomType;
     String roomId;
-    boolean isCancelled = false;
+    boolean cancelled = false;
 
-    Reservation(String guestName, String roomType) {
-        this.guestName = guestName;
-        this.roomType = roomType;
+    Reservation(String g, String r) {
+        guestName = g;
+        roomType = r;
     }
 }
 
-// ✅ THREAD-SAFE QUEUE
+// ================= QUEUE =================
 class BookingQueue {
-    private Queue<Reservation> queue = new LinkedList<>();
+    Queue<Reservation> queue = new LinkedList<>();
 
-    synchronized void addRequest(Reservation r) {
+    synchronized void add(Reservation r) {
         queue.add(r);
     }
 
-    synchronized Reservation getNextRequest() {
+    synchronized Reservation poll() {
         return queue.poll();
     }
 
@@ -94,198 +90,237 @@ class BookingQueue {
     }
 }
 
-// HISTORY
-class BookingHistory {
-    private List<Reservation> history = new ArrayList<>();
+// ================= HISTORY =================
+class BookingHistory implements Serializable {
+    List<Reservation> list = new ArrayList<>();
 
     synchronized void add(Reservation r) {
-        history.add(r);
+        list.add(r);
     }
 
-    List<Reservation> getAllBookings() {
-        return history;
-    }
-}
-
-// VALIDATOR
-class BookingValidator {
-
-    static void validate(Reservation r, RoomInventory inventory)
-            throws InvalidBookingException {
-
-        if (r.guestName == null || r.guestName.isEmpty()) {
-            throw new InvalidBookingException("Guest name cannot be empty");
-        }
-
-        if (!inventory.isValidRoomType(r.roomType)) {
-            throw new InvalidBookingException("Invalid room type: " + r.roomType);
-        }
-
-        if (inventory.getAvailability(r.roomType) <= 0) {
-            throw new InvalidBookingException("Room not available: " + r.roomType);
-        }
+    List<Reservation> getAll() {
+        return list;
     }
 }
 
-// ✅ THREAD-SAFE BOOKING SERVICE
+// ================= VALIDATOR =================
+class Validator {
+    static void validate(Reservation r, RoomInventory inv) throws InvalidBookingException {
+        if (r.guestName == null || r.guestName.trim().isEmpty())
+            throw new InvalidBookingException("Invalid guest name");
+
+        if (!inv.isValid(r.roomType))
+            throw new InvalidBookingException("Invalid room type");
+
+        if (inv.getAvailability(r.roomType) <= 0)
+            throw new InvalidBookingException("Room not available");
+    }
+}
+
+// ================= BOOKING SERVICE =================
 class BookingService {
+    RoomInventory inventory;
+    BookingHistory history;
 
-    private RoomInventory inventory;
-    private Set<String> allocatedRooms;
-    private HashMap<String, Reservation> confirmedBookings;
-    private BookingHistory history;
+    Set<String> allocatedRooms = new HashSet<>();
+    HashMap<String, Reservation> confirmedBookings = new HashMap<>();
 
     int counter = 1;
 
-    BookingService(RoomInventory inventory, BookingHistory history) {
-        this.inventory = inventory;
-        this.history = history;
-        allocatedRooms = new HashSet<>();
-        confirmedBookings = new HashMap<>();
+    BookingService(RoomInventory inv, BookingHistory hist) {
+        inventory = inv;
+        history = hist;
     }
 
-    // ✅ synchronized critical section
-    synchronized void processSingleBooking(Reservation r) {
-
+    synchronized void processBooking(Reservation r) {
         try {
-            BookingValidator.validate(r, inventory);
+            Validator.validate(r, inventory);
 
             String roomId = r.roomType + "-" + counter++;
-
-            allocatedRooms.add(roomId);
-            inventory.reduceAvailability(r.roomType);
+            inventory.reduce(r.roomType);
 
             r.roomId = roomId;
+
+            allocatedRooms.add(roomId);
             confirmedBookings.put(roomId, r);
             history.add(r);
 
             System.out.println(Thread.currentThread().getName() +
-                    " CONFIRMED -> " + r.guestName + " : " + roomId);
+                    " SUCCESS -> " + r.guestName + " booked " + roomId);
 
-        } catch (InvalidBookingException e) {
+        } catch (Exception e) {
             System.out.println(Thread.currentThread().getName() +
                     " FAILED -> " + e.getMessage());
         }
     }
-
-    HashMap<String, Reservation> getConfirmedBookings() {
-        return confirmedBookings;
-    }
 }
 
-// ✅ THREAD WORKER
-class BookingProcessor extends Thread {
+// ================= THREAD WORKER =================
+class BookingWorker extends Thread {
+    BookingQueue queue;
+    BookingService service;
 
-    private BookingQueue queue;
-    private BookingService service;
-
-    BookingProcessor(String name, BookingQueue queue, BookingService service) {
+    BookingWorker(String name, BookingQueue q, BookingService s) {
         super(name);
-        this.queue = queue;
-        this.service = service;
+        queue = q;
+        service = s;
     }
 
     public void run() {
-
         while (true) {
-
             Reservation r;
 
             synchronized (queue) {
                 if (queue.isEmpty()) break;
-                r = queue.getNextRequest();
+                r = queue.poll();
             }
 
             if (r != null) {
-                service.processSingleBooking(r);
+                service.processBooking(r);
             }
         }
     }
 }
 
-// CANCELLATION SERVICE
+// ================= CANCELLATION =================
 class CancellationService {
+    RoomInventory inventory;
+    HashMap<String, Reservation> bookings;
+    Stack<String> cancelStack = new Stack<>();
 
-    private RoomInventory inventory;
-    private HashMap<String, Reservation> bookings;
-    private Stack<String> rollbackStack = new Stack<>();
-
-    CancellationService(RoomInventory inventory,
-                        HashMap<String, Reservation> bookings) {
-        this.inventory = inventory;
-        this.bookings = bookings;
+    CancellationService(RoomInventory inv, HashMap<String, Reservation> b) {
+        inventory = inv;
+        bookings = b;
     }
 
     void cancelBooking(String roomId) {
-
         if (!bookings.containsKey(roomId)) {
-            System.out.println("Cancel Failed: Not found");
+            System.out.println("Cancellation Failed: Not found");
             return;
         }
 
         Reservation r = bookings.get(roomId);
 
-        if (r.isCancelled) {
+        if (r.cancelled) {
             System.out.println("Already cancelled");
             return;
         }
 
-        rollbackStack.push(roomId);
-        inventory.increaseAvailability(r.roomType);
-        r.isCancelled = true;
+        cancelStack.push(roomId);
+        inventory.increase(r.roomType);
+        r.cancelled = true;
 
         System.out.println("Cancelled -> " + roomId);
     }
 }
 
-// REPORT
-class BookingReportService {
-
-    void generateReport(List<Reservation> history) {
-
-        System.out.println("\n--- REPORT ---");
-
-        for (Reservation r : history) {
-            System.out.println(r.guestName + " | " + r.roomType + " | " + r.roomId);
+// ================= REPORT =================
+class ReportService {
+    void generate(List<Reservation> list) {
+        System.out.println("\n===== BOOKING REPORT =====");
+        for (Reservation r : list) {
+            System.out.println(r.guestName + " | " + r.roomType + " | " + r.roomId +
+                    (r.cancelled ? " (Cancelled)" : ""));
         }
-
-        System.out.println("Total: " + history.size());
     }
 }
 
-// MAIN
+// ================= PERSISTENCE =================
+class SystemState implements Serializable {
+    List<Reservation> bookings;
+    HashMap<String, Integer> inventory;
+
+    SystemState(List<Reservation> b, HashMap<String, Integer> i) {
+        bookings = b;
+        inventory = i;
+    }
+}
+
+class PersistenceService {
+    private static final String FILE_NAME = "hotel_data.ser";
+
+    static void save(SystemState state) {
+        try (ObjectOutputStream out =
+                     new ObjectOutputStream(new FileOutputStream(FILE_NAME))) {
+
+            out.writeObject(state);
+            System.out.println("Data Saved Successfully");
+
+        } catch (Exception e) {
+            System.out.println("Error Saving Data");
+        }
+    }
+
+    static SystemState load() {
+        try (ObjectInputStream in =
+                     new ObjectInputStream(new FileInputStream(FILE_NAME))) {
+
+            SystemState state = (SystemState) in.readObject();
+            System.out.println("Data Loaded Successfully");
+            return state;
+
+        } catch (Exception e) {
+            System.out.println("No Previous Data Found (Fresh Start)");
+            return null;
+        }
+    }
+}
+
+// ================= MAIN =================
 public class BookMyStayApp {
+    public static void main(String[] args) throws Exception {
 
-    public static void main(String[] args) {
+        System.out.println("===== SYSTEM START =====");
 
-        System.out.println("Book My Stay App v11.0 🚀");
+        // LOAD PREVIOUS STATE
+        SystemState state = PersistenceService.load();
 
         RoomInventory inventory = new RoomInventory();
-        BookingQueue queue = new BookingQueue();
         BookingHistory history = new BookingHistory();
 
-        // MULTIPLE REQUESTS
-        queue.addRequest(new Reservation("Ujjwal", "Single"));
-        queue.addRequest(new Reservation("Rahul", "Single"));
-        queue.addRequest(new Reservation("Amit", "Double"));
-        queue.addRequest(new Reservation("Ravi", "Suite"));
+        if (state != null) {
+            history.list = state.bookings;
+            inventory.inventory = state.inventory;
+        }
 
+        // CREATE QUEUE
+        BookingQueue queue = new BookingQueue();
+
+        queue.add(new Reservation("Ujjwal", "Single"));
+        queue.add(new Reservation("Rahul", "Single"));
+        queue.add(new Reservation("Amit", "Double"));
+        queue.add(new Reservation("Neha", "Suite"));
+
+        // PROCESS BOOKINGS (MULTI-THREAD)
         BookingService service = new BookingService(inventory, history);
 
-        // MULTIPLE THREADS
-        BookingProcessor t1 = new BookingProcessor("Thread-1", queue, service);
-        BookingProcessor t2 = new BookingProcessor("Thread-2", queue, service);
+        BookingWorker t1 = new BookingWorker("Thread-1", queue, service);
+        BookingWorker t2 = new BookingWorker("Thread-2", queue, service);
 
         t1.start();
         t2.start();
 
-        try {
-            t1.join();
-            t2.join();
-        } catch (Exception e) {}
+        t1.join();
+        t2.join();
+
+        // CANCEL ONE BOOKING
+        CancellationService cancelService =
+                new CancellationService(inventory, service.confirmedBookings);
+
+        for (String id : service.confirmedBookings.keySet()) {
+            cancelService.cancelBooking(id);
+            break;
+        }
 
         // REPORT
-        BookingReportService report = new BookingReportService();
-        report.generateReport(history.getAllBookings());
+        ReportService report = new ReportService();
+        report.generate(history.getAll());
+
+        // SAVE STATE
+        PersistenceService.save(
+                new SystemState(history.getAll(), inventory.inventory)
+        );
+
+        System.out.println("===== SYSTEM END =====");
     }
 }
