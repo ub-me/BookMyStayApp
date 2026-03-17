@@ -9,28 +9,18 @@ abstract class Room {
         this.beds = beds;
         this.price = price;
     }
-
-    void displayRoom() {
-        System.out.println("Beds: " + beds + ", Price: " + price);
-    }
 }
 
 class SingleRoom extends Room {
-    SingleRoom() {
-        super(1, 1000);
-    }
+    SingleRoom() { super(1, 1000); }
 }
 
 class DoubleRoom extends Room {
-    DoubleRoom() {
-        super(2, 2000);
-    }
+    DoubleRoom() { super(2, 2000); }
 }
 
 class SuiteRoom extends Room {
-    SuiteRoom() {
-        super(3, 5000);
-    }
+    SuiteRoom() { super(3, 5000); }
 }
 
 // INVENTORY
@@ -71,7 +61,6 @@ class BookingQueue {
 
     void addRequest(Reservation r) {
         queue.add(r);
-        System.out.println("Request Added: " + r.guestName + " -> " + r.roomType);
     }
 
     Reservation getNextRequest() {
@@ -83,17 +72,32 @@ class BookingQueue {
     }
 }
 
+// ✅ NEW: BOOKING HISTORY
+class BookingHistory {
+    private List<Reservation> history = new ArrayList<>();
+
+    void add(Reservation r) {
+        history.add(r);
+    }
+
+    List<Reservation> getAllBookings() {
+        return history;
+    }
+}
+
 // BOOKING SERVICE
 class BookingService {
 
     private RoomInventory inventory;
     private Set<String> allocatedRooms;
     private HashMap<String, Reservation> confirmedBookings;
+    private BookingHistory history;
 
     int counter = 1;
 
-    BookingService(RoomInventory inventory) {
+    BookingService(RoomInventory inventory, BookingHistory history) {
         this.inventory = inventory;
+        this.history = history;
         allocatedRooms = new HashSet<>();
         confirmedBookings = new HashMap<>();
     }
@@ -117,11 +121,14 @@ class BookingService {
                     r.roomId = roomId;
                     confirmedBookings.put(roomId, r);
 
-                    System.out.println("Booking Confirmed: " + r.guestName + " -> " + roomId);
+                    // ✅ ADD TO HISTORY
+                    history.add(r);
+
+                    System.out.println("Confirmed: " + r.guestName + " -> " + roomId);
                 }
 
             } else {
-                System.out.println("Booking Failed for " + r.guestName);
+                System.out.println("Failed: " + r.guestName);
             }
         }
     }
@@ -131,7 +138,7 @@ class BookingService {
     }
 }
 
-// ✅ NEW: SERVICE CLASS
+// SERVICE CLASS
 class Service {
     String name;
     int cost;
@@ -142,39 +149,45 @@ class Service {
     }
 }
 
-// ✅ NEW: ADD-ON SERVICE MANAGER
+// ADD-ON SERVICE MANAGER
 class AddOnServiceManager {
 
     private HashMap<String, List<Service>> serviceMap = new HashMap<>();
 
-    // Add service to reservation
     void addService(String roomId, Service service) {
-
         serviceMap.putIfAbsent(roomId, new ArrayList<>());
         serviceMap.get(roomId).add(service);
-
-        System.out.println("Added Service: " + service.name + " to " + roomId);
     }
 
-    // Calculate total cost
-    void calculateCost(String roomId) {
+    int calculateCost(String roomId) {
 
         List<Service> services = serviceMap.get(roomId);
-
-        if (services == null) {
-            System.out.println("No services for " + roomId);
-            return;
-        }
-
         int total = 0;
-        System.out.println("\nServices for " + roomId + ":");
 
-        for (Service s : services) {
-            System.out.println(s.name + " - " + s.cost);
-            total += s.cost;
+        if (services != null) {
+            for (Service s : services) {
+                total += s.cost;
+            }
         }
 
-        System.out.println("Total Add-on Cost: " + total);
+        return total;
+    }
+}
+
+// ✅ NEW: REPORT SERVICE
+class BookingReportService {
+
+    void generateReport(List<Reservation> history) {
+
+        System.out.println("\n--- BOOKING REPORT ---");
+
+        for (Reservation r : history) {
+            System.out.println("Guest: " + r.guestName +
+                    ", Room: " + r.roomType +
+                    ", ID: " + r.roomId);
+        }
+
+        System.out.println("Total Bookings: " + history.size());
     }
 }
 
@@ -182,30 +195,32 @@ class AddOnServiceManager {
 public class BookMyStayApp {
     public static void main(String[] args) {
 
-        System.out.println("Book My Stay App v7.0");
+        System.out.println("Book My Stay App v8.0");
 
         RoomInventory inventory = new RoomInventory();
         BookingQueue queue = new BookingQueue();
+        BookingHistory history = new BookingHistory();
 
-        // Booking requests
+        // Requests
         queue.addRequest(new Reservation("Ujjwal", "Single"));
         queue.addRequest(new Reservation("Rahul", "Double"));
+        queue.addRequest(new Reservation("Amit", "Suite"));
 
-        // Process bookings
-        BookingService service = new BookingService(inventory);
+        // Process
+        BookingService service = new BookingService(inventory, history);
         service.processBookings(queue);
-
-        // Get confirmed bookings
-        HashMap<String, Reservation> bookings = service.getConfirmedBookings();
 
         // Add-on services
         AddOnServiceManager manager = new AddOnServiceManager();
+        HashMap<String, Reservation> bookings = service.getConfirmedBookings();
 
         for (String roomId : bookings.keySet()) {
             manager.addService(roomId, new Service("Breakfast", 200));
             manager.addService(roomId, new Service("WiFi", 100));
-
-            manager.calculateCost(roomId);
         }
+
+        // ✅ REPORT GENERATION
+        BookingReportService report = new BookingReportService();
+        report.generateReport(history.getAllBookings());
     }
 }
